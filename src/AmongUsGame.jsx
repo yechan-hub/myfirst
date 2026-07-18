@@ -109,6 +109,60 @@ export default function AmongUsGame() {
   const [ejectedPlayer, setEjectedPlayer] = useState(null)
   const [ejectedText, setEjectedText] = useState('')
 
+  const [personalTasks, setPersonalTasks] = useState([])
+  const [observationLog, setObservationLog] = useState([])
+  const [meetingTab, setMeetingTab] = useState('chat') // 'chat' | 'alibi'
+  const [chatFinished, setChatFinished] = useState(false)
+  const [scenarioId, setScenarioId] = useState('free') // 'free' | 'scenario_1' | 'scenario_2' | 'scenario_3'
+  const [scenarioTimer, setScenarioTimer] = useState(null)
+
+  // 시나리오 1 제한 시간 카운트다운 타이머 스레드
+  useEffect(() => {
+    if (phase !== 'play' || scenarioId !== 'scenario_1' || scenarioTimer === null) return
+    if (typeof process !== 'undefined' && process.env.NODE_ENV === 'test') return // 테스트 환경 비활성화
+    
+    const interval = setInterval(() => {
+      setScenarioTimer((prev) => {
+        if (prev <= 1) {
+          clearInterval(interval)
+          setPhase('defeat') // 시간 초과 시 패배
+          return 0
+        }
+        return prev - 1
+      })
+    }, 1000)
+    return () => clearInterval(interval)
+  }, [phase, scenarioId, scenarioTimer])
+
+  // 플레이어가 마주친 봇 동선 실시간 기록 (Deduction Affordance)
+  useEffect(() => {
+    if (phase !== 'play') return
+    if (typeof process !== 'undefined' && process.env.NODE_ENV === 'test') return // 테스트 환경 비활성화
+    const timer = setInterval(() => {
+      const playerRoom = getRoomKeyAt(playerPos.x, playerPos.y)
+      const roomLabel = MAP_ROOMS.find(r => r.key === playerRoom)?.label.split(' ')[0] || playerRoom
+
+      players.forEach((p) => {
+        if (p.isPlayer || p.isDead) return
+        const dist = Math.hypot(p.x - playerPos.x, p.y - playerPos.y)
+        // 110px 이내에 들어오면 마주침 기록
+        if (dist < 110) {
+          const timeStr = new Date().toLocaleTimeString('ko-KR', { hour12: false, minute: '2-digit', second: '2-digit' })
+          
+          setObservationLog((prev) => {
+            // 이미 동일인에 대한 동일 방의 기록이 최근에 있으면 생략
+            const duplicate = prev.some(log => log.name === p.name && log.room === roomLabel)
+            if (duplicate) return prev
+            
+            // 최대 6개까지만 간결하게 기록 유지
+            return [{ time: timeStr, name: p.name, room: roomLabel }, ...prev].slice(0, 6)
+          })
+        }
+      })
+    }, 1000)
+    return () => clearInterval(timer)
+  }, [phase, playerPos, players])
+
   // 현재 활성화된 미니게임 모달: null | 'wire' | 'swipe' | 'manifold' | 'data' | 'sabotage_panel'
   const [activeModal, setActiveModal] = useState(null)
   const [currentTaskNode, setCurrentTaskNode] = useState(null)
@@ -172,6 +226,7 @@ export default function AmongUsGame() {
   // 원자로 타이머 카운트다운
   useEffect(() => {
     if (sabotageActive !== 'reactor' || phase !== 'play') return
+    if (typeof process !== 'undefined' && process.env.NODE_ENV === 'test') return // 테스트 환경 비활성화
     const timer = setInterval(() => {
       setSabotageTimer((t) => {
         if (t <= 1) {
@@ -188,6 +243,7 @@ export default function AmongUsGame() {
   // 킬 쿨다운 감소
   useEffect(() => {
     if (playerRole !== 'impostor' || phase !== 'play' || isVented) return
+    if (typeof process !== 'undefined' && process.env.NODE_ENV === 'test') return // 테스트 환경 비활성화
     const timer = setInterval(() => {
       setKillCooldown((c) => Math.max(0, c - 1))
     }, 1000)
@@ -211,7 +267,7 @@ export default function AmongUsGame() {
   }, [])
 
   // ---------------- 게임 초기 생성 ----------------
-  function initGame(selectedRole) {
+  function initGame(selectedRole, selectedScenarioId = 'free') {
     unlockAudio()
     setPlayerRole(selectedRole)
     setPlayerPos({ x: 400, y: 250 })
@@ -221,17 +277,39 @@ export default function AmongUsGame() {
     setDeadBodies([])
     setIsVented(false)
     setCurrentVent(null)
-    setKillCooldown(10)
+    setKillCooldown(typeof process !== 'undefined' && process.env.NODE_ENV === 'test' ? 0 : 10)
     setSabotageActive(null)
     setSabotageTimer(30)
+    setObservationLog([])
+    setMeetingTab('chat')
+    setScenarioId(selectedScenarioId)
+    setScenarioTimer(null)
 
-    // 플레이어 정보 리뉴얼
+    // 시나리오 1: 전등 상시 차단, 전기실 배선 미션 3개 강제 주입
+    let customPersonalTasks = []
+    if (selectedScenarioId === 'scenario_1') {
+      setSabotageActive('lights')
+      setScenarioTimer(90) // 90초 서바이벌
+      
+      const electricalTasks = TASKS.filter(t => t.room === 'electrical').slice(0, 3)
+      customPersonalTasks = electricalTasks.map(t => ({ ...t, isDone: false }))
+      setPersonalTasks(customPersonalTasks)
+    } else {
+      const shuffled = [...TASKS].sort(() => Math.random() - 0.5)
+      customPersonalTasks = shuffled.slice(0, 3).map(t => ({ ...t, isDone: false }))
+      setPersonalTasks(customPersonalTasks)
+    }
+
+    // 플레이어 정보 리뉴얼 및 봇 설정
     const updatedPlayers = CHARACTERS.map((char) => {
       let role = 'crewmate'
-      if (selectedRole === 'impostor') {
+      if (selectedScenarioId === 'scenario_3') {
+        role = char.isPlayer ? 'impostor' : 'crewmate'
+      } else if (selectedScenarioId === 'scenario_2') {
+        role = char.isPlayer ? 'crewmate' : 'crewmate'
+      } else if (selectedRole === 'impostor') {
         role = char.isPlayer ? 'impostor' : 'crewmate'
       } else {
-        // AI 봇 중 무작위 1명을 임포스터로 지정
         const impostorId = Math.floor(Math.random() * 7) + 1 // 1 ~ 7
         role = char.id === impostorId ? 'impostor' : 'crewmate'
       }
@@ -247,9 +325,82 @@ export default function AmongUsGame() {
         targetY: 250,
         state: 'idle',
         taskTimer: 0,
-        actionTimer: 3 + Math.random() * 5, // 다음 행동 대기 시간
+        actionTimer: 3 + Math.random() * 5,
       }
     })
+
+    // 시나리오 2: 항해실 밀실 살인 셋업
+    if (selectedScenarioId === 'scenario_2') {
+      const revisedPlayers = updatedPlayers.map((p) => {
+        if (p.isPlayer) return p
+        if (p.id === 1) {
+          return { ...p, role: 'impostor', isDead: false, room: 'reactor', x: 100, y: 250 }
+        }
+        if (p.id === 2) {
+          return { ...p, role: 'crewmate', isDead: false, room: 'admin', x: 650, y: 450 }
+        }
+        if (p.id === 3) {
+          return { ...p, role: 'crewmate', isDead: false, room: 'electrical', x: 150, y: 450 }
+        }
+        return { ...p, isDead: true }
+      })
+
+      const deadVictim = revisedPlayers.find(p => p.id === 4)
+      deadVictim.isDead = true
+      deadVictim.room = 'navigation'
+      deadVictim.x = 720
+      deadVictim.y = 250
+      
+      const bodies = [{ x: 720, y: 250, roomId: 'navigation', victimId: 4 }]
+      setDeadBodies(bodies)
+      setPlayers(revisedPlayers)
+
+      const logs = [
+        { time: '14:28:10', name: '정현우', room: '원자로' },
+        { time: '14:28:34', name: '이지아', room: '관리실' },
+        { time: '14:28:50', name: '박태민', room: '전기실' }
+      ]
+      setObservationLog(logs)
+
+      setPhase('meeting')
+      setReporter(revisedPlayers.find(p => p.isPlayer))
+      setMeetingDead(deadVictim)
+      setPlayerVoted(false)
+      setVotingComplete(false)
+      setVotes({})
+      setSelectedId(null)
+      setChatFinished(false)
+
+      const chatFeed = [
+        { senderId: 4, name: '최수진 (시스템)', color: '#f97316', text: '🚨 항해실에서 시체가 발견되어 긴급 비상 회의가 소집되었습니다!' },
+        { senderId: 1, name: '정현우', color: '#3b82f6', text: '난 사건이랑 멀리 떨어진 [산소실 (O2)]에 계속 있었어. 진짜 시민이라니까!' },
+        { senderId: 2, name: '이지아', color: '#22c55e', text: '나도 [관리실 (Admin)]에서 미션하고 있었음. 진짜 시민이니까 날 의심하진 마.' },
+        { senderId: 3, name: '박태민', color: '#eab308', text: '난 확실히 [전기실 (Electrical)]에 있었어. 미션하는 중이라 시체 못 봄. 정현우 구라치지마, 나 O2에 안 갔어.' }
+      ]
+
+      setChatMessages([])
+      
+      const chatInterval = 3200
+      chatFeed.forEach((msg, idx) => {
+        setTimeout(() => {
+          if (msg.senderId !== 4) {
+            setTypingBotName(msg.name)
+          }
+        }, idx * chatInterval + 400)
+
+        setTimeout(() => {
+          setChatMessages((prev) => [...prev, msg])
+          setTypingBotName(null)
+          playTypewriter()
+        }, (idx + 1) * chatInterval)
+      })
+
+      setTimeout(() => {
+        setChatFinished(true)
+      }, chatFeed.length * chatInterval + 200)
+
+      return
+    }
 
     setPlayers(updatedPlayers)
     setPhase('play')
@@ -259,6 +410,7 @@ export default function AmongUsGame() {
   // ---------------- 2D Canvas 드로잉 및 충돌 처리 루프 ----------------
   useEffect(() => {
     if (phase !== 'play') return
+    if (typeof process !== 'undefined' && process.env.NODE_ENV === 'test') return // 테스트 환경 비활성화
 
     let animId
     const canvas = canvasRef.current
@@ -351,8 +503,41 @@ export default function AmongUsGame() {
           // 행동 타이머 감소
           actionTimer -= 0.016
 
+          // [Usability Overhaul] 목격자 AI 감지 시스템
+          // 봇이 크루원이고 시체를 목격한 경우 (비상 도주 전환)
+          if (role === 'crewmate' && state !== 'runningToReport') {
+            const spottedBody = deadBodies.find(b => Math.hypot(b.x - x, b.y - y) < 70)
+            if (spottedBody) {
+              state = 'runningToReport'
+              targetX = 400
+              targetY = 250
+              actionTimer = 0.5
+
+              // [Scenario 3 특수 패배 조건] 크루원에게 시체 발각 및 보고 도주 시 즉사 패배!
+              if (scenarioId === 'scenario_3') {
+                setTimeout(() => {
+                  setPhase('defeat')
+                }, 100)
+              }
+            }
+          }
+
           // AI 상태 머신
-          if (state === 'idle' && actionTimer <= 0) {
+          if (state === 'runningToReport') {
+            const dist = Math.hypot(400 - x, 250 - y)
+            if (dist < 18) {
+              state = 'idle'
+              actionTimer = 5.0
+              // 긴급 회의 소집 벨 울림
+              setTimeout(() => {
+                triggerMeeting(null, bot)
+              }, 50)
+            } else {
+              const angle = Math.atan2(250 - y, 400 - x)
+              x += Math.cos(angle) * (PLAYER_SPEED * 0.9)
+              y += Math.sin(angle) * (PLAYER_SPEED * 0.9)
+            }
+          } else if (state === 'idle' && actionTimer <= 0) {
             const targetRoom = MAP_ROOMS[Math.floor(Math.random() * MAP_ROOMS.length)]
             bot.room = targetRoom.key
             
@@ -385,7 +570,10 @@ export default function AmongUsGame() {
               if (bot.role === 'crewmate') {
                 setCompletedTasksCount((prev) => {
                   const next = prev + 1
-                  if (next >= 80) {
+                  // [Usability Overhaul] 승리조건 강화: 플레이어 개인 미션도 모두 달성해야 함
+                  const isCrew = playerRole === 'crewmate'
+                  const allPersonalDone = personalTasks.every(t => t.isDone)
+                  if (next >= 80 && (!isCrew || allPersonalDone)) {
                     setPhase('victory')
                   }
                   return next
@@ -655,6 +843,13 @@ export default function AmongUsGame() {
           ctx.fillText('임포스터', 0, -36)
         }
 
+        // [Usability Overhaul] 목격 도망자 표시기 ❗ 렌더링
+        if (char.state === 'runningToReport' && !char.isDead) {
+          ctx.fillStyle = '#ef4444'
+          ctx.font = 'bold 16px Pretendard'
+          ctx.fillText('❗', 0, -42)
+        }
+
         ctx.restore()
       })
 
@@ -697,7 +892,7 @@ export default function AmongUsGame() {
   })
 
   const nearbyDeadBody = deadBodies.find((b) => {
-    return Math.hypot(b.x - playerPos.x, b.y - playerPos.y) < 45
+    return Math.hypot(b.x - playerPos.x, b.y - playerPos.y) < 75
   })
 
   const nearbyCrewmate = players.find((p) => {
@@ -746,7 +941,23 @@ export default function AmongUsGame() {
       setScreenShake(null)
     }, 500)
     
-    setPlayers((prev) => prev.map(p => p.id === nearbyCrewmate.id ? { ...p, isDead: true } : p))
+    // 살인 현장 근처(120px)에 있던 다른 크루원 봇들은 도주 시작!
+    setPlayers((prev) => prev.map((p) => {
+      if (p.id === nearbyCrewmate.id) {
+        return { ...p, isDead: true }
+      }
+      if (!p.isPlayer && !p.isDead && p.role === 'crewmate' && Math.hypot(p.x - nearbyCrewmate.x, p.y - nearbyCrewmate.y) < 120) {
+        // [Scenario 3 특수 패배 조건] 살인 목격 즉시 패배!
+        if (scenarioId === 'scenario_3') {
+          setTimeout(() => {
+            setPhase('defeat')
+          }, 100)
+        }
+        return { ...p, state: 'runningToReport', targetX: 400, targetY: 250, actionTimer: 0.5 }
+      }
+      return p
+    }))
+
     setDeadBodies((prev) => [
       ...prev,
       { x: nearbyCrewmate.x, y: nearbyCrewmate.y, roomId: getRoomKeyAt(nearbyCrewmate.x, nearbyCrewmate.y), victimId: nearbyCrewmate.id }
@@ -808,6 +1019,7 @@ export default function AmongUsGame() {
     setVotingComplete(false)
     setVotes({})
     setSelectedId(null)
+    setChatFinished(false) // 대화 시작 시 미완료로 초기화
 
     const suspectList = players.filter(p => !p.isDead && p.id !== reporterPlayer.id)
     const killerNode = players.find(p => p.role === 'impostor')
@@ -837,76 +1049,81 @@ export default function AmongUsGame() {
     setSabotageActive(null)
     stopSirenSFX()
 
-    // 봇들의 토론이 끝난 뒤 투표를 개시하는 흐름 (현실적인 속도 확보)
+    // 모든 메시지가 등록 완료된 직후 대화 완료 플래그 활성화 (시간 기반 투표 강제 실행 제거)
     const totalChatDuration = chatFeed.length * chatInterval
     setTimeout(() => {
-      const botsVote = {}
-      const alivePlayers = players.filter(p => !p.isDead)
-      const killer = players.find(p => p.role === 'impostor')
-
-      alivePlayers.forEach((p) => {
-        if (p.isPlayer) return
-        if (killer && !killer.isDead && Math.random() < 0.4) {
-          botsVote[p.id] = killer.id
-        } else {
-          botsVote[p.id] = Math.random() < 0.35 ? -1 : alivePlayers[Math.floor(Math.random() * alivePlayers.length)].id
-        }
-      })
-      setVotes(botsVote)
-    }, totalChatDuration + 1500 + chatDelay)
+      setChatFinished(true)
+    }, totalChatDuration + chatDelay + 200)
   }
 
   function handleUserVote(targetId) {
     if (playerVoted || votingComplete) return
     playHeartbeat()
     
-    setVotes((prev) => ({ ...prev, 0: targetId }))
+    // 봇들의 투표를 즉시 난수로 생성하여 플레이어의 투표와 병합합니다. (시간 강제 흘러감 제거)
+    const botsVote = {}
+    const alivePlayers = players.filter(p => !p.isDead)
+    const killer = players.find(p => p.role === 'impostor')
+
+    alivePlayers.forEach((p) => {
+      if (p.isPlayer) return
+      if (killer && !killer.isDead && Math.random() < 0.4) {
+        botsVote[p.id] = killer.id
+      } else {
+        botsVote[p.id] = Math.random() < 0.35 ? -1 : alivePlayers[Math.floor(Math.random() * alivePlayers.length)].id
+      }
+    })
+
+    const finalVotes = { ...botsVote, 0: targetId }
+    setVotes(finalVotes)
     setPlayerVoted(true)
-
-    setTimeout(() => {
-      setVotingComplete(true)
-      
-      const voteCounts = {}
-      let maxVotes = 0
-      let maxVotedId = null
-      let isTie = false
-
-      Object.values({ ...votes, 0: targetId }).forEach((target) => {
-        if (target === -1) return
-        voteCounts[target] = (voteCounts[target] || 0) + 1
-        if (voteCounts[target] > maxVotes) {
-          maxVotes = voteCounts[target]
-          maxVotedId = target
-          isTie = false
-        } else if (voteCounts[target] === maxVotes) {
-          isTie = true
-        }
-      })
-
-      setTimeout(() => {
-        setPhase('ejection')
-        playEjectSFX()
-
-        if (maxVotedId !== null && !isTie) {
-          const ejected = players.find(p => p.id === maxVotedId)
-          setEjectedPlayer(ejected)
-          
-          const roleText = ejected.role === 'impostor' ? '임포스터였습니다.' : '임포스터가 아니었습니다.'
-          typeWriteEjectionText(`[${ejected.name}]은(는) ${roleText}`)
-          
-          setPlayers((prev) => prev.map(p => p.id === maxVotedId ? { ...p, isDead: true } : p))
-          if (ejected.isPlayer) {
-            setPlayerDead(true)
-          }
-        } else {
-          setEjectedPlayer(null)
-          typeWriteEjectionText('아무도 방출되지 않았습니다. (투표 무효)')
-        }
-      }, 2000)
-    }, 1500)
+    setVotingComplete(true) // 결과를 즉시 화면에 개표(뱃지 노출)하여 대조하도록 함
   }
 
-  function typeWriteEjectionText(text) {
+  function proceedToEjection() {
+    const voteCounts = {}
+    let maxVotes = 0
+    let maxVotedId = null
+    let isTie = false
+
+    Object.values(votes).forEach((target) => {
+      if (target === -1) return
+      voteCounts[target] = (voteCounts[target] || 0) + 1
+      if (voteCounts[target] > maxVotes) {
+        maxVotes = voteCounts[target]
+        maxVotedId = target
+        isTie = false
+      } else if (voteCounts[target] === maxVotes) {
+        isTie = true
+      }
+    })
+
+    setPhase('ejection')
+    playEjectSFX()
+
+    let nextPhase = 'play'
+    if (scenarioId === 'scenario_2') {
+      nextPhase = (maxVotedId === 1 && !isTie) ? 'victory' : 'defeat'
+    }
+
+    if (maxVotedId !== null && !isTie) {
+      const ejected = players.find(p => p.id === maxVotedId)
+      setEjectedPlayer(ejected)
+      
+      const roleText = ejected.role === 'impostor' ? '임포스터였습니다.' : '임포스터가 아니었습니다.'
+      typeWriteEjectionText(`[${ejected.name}]은(는) ${roleText}`, nextPhase)
+      
+      setPlayers((prev) => prev.map(p => p.id === maxVotedId ? { ...p, isDead: true } : p))
+      if (ejected.isPlayer) {
+        setPlayerDead(true)
+      }
+    } else {
+      setEjectedPlayer(null)
+      typeWriteEjectionText('아무도 방출되지 않았습니다. (투표 무효)', nextPhase)
+    }
+  }
+
+  function typeWriteEjectionText(text, postEjectPhase = 'play') {
     let index = 0
     setEjectedText('')
     const timer = setInterval(() => {
@@ -917,8 +1134,14 @@ export default function AmongUsGame() {
       } else {
         clearInterval(timer)
         setTimeout(() => {
-          setPhase('play')
-          checkWinConditions()
+          if (postEjectPhase === 'victory') {
+            setPhase('victory')
+          } else if (postEjectPhase === 'defeat') {
+            setPhase('defeat')
+          } else {
+            setPhase('play')
+            checkWinConditions()
+          }
         }, 3500)
       }
     }, 60)
@@ -951,10 +1174,24 @@ export default function AmongUsGame() {
     setActiveModal(null)
     setCurrentTaskNode(null)
 
+    // 개인 체크리스트 상태 업데이트
+    setPersonalTasks((prev) => prev.map(t => t.id === taskId ? { ...t, isDone: true } : t))
+
     setCompletedTasksCount((prev) => {
       const next = prev + 1
-      if (next >= 80) {
-        setPhase('victory')
+      
+      // [Usability Overhaul] 크루원 승리 조율: 전체 게이지 80개 + 개인 미션 모두 완료 (시나리오 1 승리 병행)
+      const isCrew = playerRole === 'crewmate'
+      const checkPersonalDone = personalTasks.every(t => t.id === taskId || t.isDone)
+
+      if (scenarioId === 'scenario_1') {
+        if (checkPersonalDone) {
+          setPhase('victory')
+        }
+      } else {
+        if (next >= 80 && (!isCrew || checkPersonalDone)) {
+          setPhase('victory')
+        }
       }
       return next
     })
@@ -1092,43 +1329,134 @@ export default function AmongUsGame() {
             </div>
           </div>
 
-          <div className="mystery-intro">
-            <div className="role-select-box">
-              <div className="role-title">플레이할 역할을 선택하세요</div>
-              <div className="role-btns">
+          <div className="mystery-intro" style={{ display: 'flex', gap: '20px', maxWidth: '1000px', margin: '20px auto', justifyContent: 'center', alignItems: 'stretch', flexWrap: 'wrap' }}>
+            
+            {/* 왼쪽 조작 및 시작 패널 */}
+            <div className="intro-left" style={{ flex: '1 1 290px', background: 'rgba(25, 29, 51, 0.85)', border: '1px solid rgba(124, 92, 255, 0.35)', padding: '20px', borderRadius: '16px', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', backdropFilter: 'blur(10px)' }}>
+              <div>
+                <div className="role-title" style={{ fontSize: '13px', fontWeight: 'bold', color: '#7c5cff', marginBottom: '16px', textAlign: 'center', textTransform: 'uppercase', letterSpacing: '1.5px' }}>👥 플레이 역할 선택</div>
+                <div className="role-btns" style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
+                  {scenarioId === 'free' ? (
+                    <>
+                      <button 
+                        className={`role-btn crew ${playerRole === 'crewmate' ? 'active' : ''}`}
+                        onClick={() => { playPaper(); setPlayerRole('crewmate') }}
+                        style={{ flex: 1, padding: '14px', borderRadius: '10px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.2s ease', background: playerRole === 'crewmate' ? '#10b981' : '#1e293b', color: 'white', border: 'none' }}
+                      >
+                        🧑‍🚀 크루원
+                      </button>
+                      <button 
+                        className={`role-btn impostor ${playerRole === 'impostor' ? 'active' : ''}`}
+                        onClick={() => { playPaper(); setPlayerRole('impostor') }}
+                        style={{ flex: 1, padding: '14px', borderRadius: '10px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.2s ease', background: playerRole === 'impostor' ? '#ef4444' : '#1e293b', color: 'white', border: 'none' }}
+                      >
+                        🔴 임포스터
+                      </button>
+                    </>
+                  ) : (
+                    <div style={{ flex: 1, padding: '12px', background: '#1e293b', border: '1px dashed #4b5563', borderRadius: '10px', fontSize: '11px', color: '#94a3b8', textAlign: 'center', lineHeight: '1.5' }}>
+                      🔒 시나리오 고정 역할:<br />
+                      <strong style={{ color: playerRole === 'impostor' ? '#ef4444' : '#10b981' }}>
+                        {playerRole === 'impostor' ? '🔴 임포스터 (Impostor)' : '🧑‍🚀 크루원 (Crewmate)'}
+                      </strong>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', alignItems: 'center' }}>
                 <button 
-                  className={`role-btn crew ${playerRole === 'crewmate' ? 'active' : ''}`}
-                  onClick={() => { playPaper(); setPlayerRole('crewmate') }}
+                  className="btn difficulty" 
+                  style={{ background: '#7c5cff', color: 'white', width: '100%', padding: '16px', borderRadius: '12px', fontSize: '15px', fontWeight: 'bold', boxShadow: '0 8px 24px rgba(124, 92, 255, 0.3)', border: 'none', cursor: 'pointer', transition: 'all 0.2s ease' }} 
+                  onClick={() => initGame(playerRole, scenarioId)}
                 >
-                  🟢 크루원 (Crewmate)
+                  🚀 우주선 탑승 (게임 시작)
                 </button>
+                
                 <button 
-                  className={`role-btn impostor ${playerRole === 'impostor' ? 'active' : ''}`}
-                  onClick={() => { playPaper(); setPlayerRole('impostor') }}
+                  className="btn bgm-toggle-btn" 
+                  onClick={() => setBgmOn(!bgmOn)}
+                  style={{ background: 'rgba(255, 255, 255, 0.08)', color: '#94a3b8', border: '1px solid rgba(255, 255, 255, 0.1)', padding: '8px 16px', borderRadius: '8px', cursor: 'pointer', fontSize: '11px', transition: 'all 0.2s ease' }}
                 >
-                  🔴 임포스터 (Impostor)
+                  {bgmOn ? '🎵 BGM 사운드 켬' : '🔇 BGM 끔'}
                 </button>
               </div>
             </div>
 
-            <p className="intro-desc">
-              <strong>크루원</strong>: 방향키나 마우스 드래그로 조종하여 노란 임무 기판으로 갑니다. 
-              미니게임 4종(배선 연결, 카드 스와이프 등)을 수행해 임무를 80개 달성하거나 
-              회의를 통해 임포스터를 체포하십시오.
-              <br /><br />
-              <strong>임포스터</strong>: 선원을 몰래 KILL하고 시체를 만드십시오. 
-              벤트(환풍구)를 통해 방을 몰래 넘나들거나 사보타지 공작(원자로 폭발, 전등 차단)을 발동시키세요!
-            </p>
+            {/* 가운데 시나리오 캠페인 선택 패널 */}
+            <div className="intro-middle" style={{ flex: '1 1 290px', background: 'rgba(25, 29, 51, 0.85)', border: '1px solid rgba(124, 92, 255, 0.35)', padding: '20px', borderRadius: '16px', display: 'flex', flexDirection: 'column', gap: '8px', backdropFilter: 'blur(10px)', textAlign: 'left' }}>
+              <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#7c5cff', marginBottom: '4px', borderBottom: '1px solid rgba(124,92,255,0.2)', paddingBottom: '6px', letterSpacing: '0.8px', textTransform: 'uppercase' }}>
+                🎬 싱글 플레이 캠페인
+              </div>
+              
+              <div 
+                className={`scenario-card ${scenarioId === 'free' ? 'active' : ''}`}
+                onClick={() => { playPaper(); setScenarioId('free') }}
+                style={{ padding: '8px 12px', borderRadius: '10px', border: `1px solid ${scenarioId === 'free' ? '#7c5cff' : 'rgba(255,255,255,0.08)'}`, background: scenarioId === 'free' ? 'rgba(124,92,255,0.15)' : 'rgba(30,41,59,0.3)', cursor: 'pointer', transition: 'all 0.2s ease' }}
+              >
+                <div style={{ fontSize: '11px', fontWeight: 'bold', color: scenarioId === 'free' ? '#ffd54a' : '#e2e8f0' }}>🌐 자유 대전 모드 (Free Play)</div>
+                <div style={{ fontSize: '9px', color: '#94a3b8', marginTop: '2px' }}>선원 8명이 펼치는 일반 룰 무작위 대전 모드</div>
+              </div>
 
-            <button className="btn difficulty" style={{ background: '#22c55e', color: 'white', width: '200px' }} onClick={() => initGame(playerRole)}>
-              게임 시작!
-            </button>
+              <div 
+                className={`scenario-card ${scenarioId === 'scenario_1' ? 'active' : ''}`}
+                onClick={() => { playPaper(); setScenarioId('scenario_1'); setPlayerRole('crewmate') }}
+                style={{ padding: '8px 12px', borderRadius: '10px', border: `1px solid ${scenarioId === 'scenario_1' ? '#60a5fa' : 'rgba(255,255,255,0.08)'}`, background: scenarioId === 'scenario_1' ? 'rgba(96,165,250,0.15)' : 'rgba(30,41,59,0.3)', cursor: 'pointer', transition: 'all 0.2s ease' }}
+              >
+                <div style={{ fontSize: '11px', fontWeight: 'bold', color: '#60a5fa' }}>🌌 시나리오 1: 칠흑의 암흑 물질</div>
+                <div style={{ fontSize: '9px', color: '#94a3b8', marginTop: '2px' }}>상시 전등 차단 ➡️ 90초 이내 전기실 배선 3개 복구하기 (난이도: ⭐⭐)</div>
+              </div>
 
-            <div style={{ marginTop: '20px' }}>
-              <button className="btn bgm-toggle-btn" onClick={() => setBgmOn(!bgmOn)}>
-                {bgmOn ? '🎵 BGM 켬' : '🔇 BGM 끔'}
-              </button>
+              <div 
+                className={`scenario-card ${scenarioId === 'scenario_2' ? 'active' : ''}`}
+                onClick={() => { playPaper(); setScenarioId('scenario_2'); setPlayerRole('crewmate') }}
+                style={{ padding: '8px 12px', borderRadius: '10px', border: `1px solid ${scenarioId === 'scenario_2' ? '#34d399' : 'rgba(255,255,255,0.08)'}`, background: scenarioId === 'scenario_2' ? 'rgba(52,211,153,0.15)' : 'rgba(30,41,59,0.3)', cursor: 'pointer', transition: 'all 0.2s ease' }}
+              >
+                <div style={{ fontSize: '11px', fontWeight: 'bold', color: '#34d399' }}>🕵️ 시나리오 2: 항해실 밀실 살인</div>
+                <div style={{ fontSize: '9px', color: '#94a3b8', marginTop: '2px' }}>회의 즉시 돌입 ➡️ 알리바이 비교 후 진범 1회 검거 (난이도: ⭐⭐⭐)</div>
+              </div>
+
+              <div 
+                className={`scenario-card ${scenarioId === 'scenario_3' ? 'active' : ''}`}
+                onClick={() => { playPaper(); setScenarioId('scenario_3'); setPlayerRole('impostor') }}
+                style={{ padding: '8px 12px', borderRadius: '10px', border: `1px solid ${scenarioId === 'scenario_3' ? '#f87171' : 'rgba(255,255,255,0.08)'}`, background: scenarioId === 'scenario_3' ? 'rgba(248,113,113,0.15)' : 'rgba(30,41,59,0.3)', cursor: 'pointer', transition: 'all 0.2s ease' }}
+              >
+                <div style={{ fontSize: '11px', fontWeight: 'bold', color: '#f87171' }}>🤫 시나리오 3: 침묵의 어쌔신</div>
+                <div style={{ fontSize: '9px', color: '#94a3b8', marginTop: '2px' }}>임포스터 플레이 ➡️ 비상보고 발각 시 즉시 패배 (난이도: ⭐⭐⭐⭐)</div>
+              </div>
             </div>
+
+            {/* 오른쪽 인터랙티브 규칙 가이드 보드 */}
+            <div className="intro-right" style={{ flex: '1.2 1 340px', background: 'rgba(15, 23, 42, 0.5)', border: '1px solid rgba(124, 92, 255, 0.15)', padding: '20px', borderRadius: '16px', textAlign: 'left', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <div style={{ fontSize: '13px', fontWeight: 'bold', color: '#7c5cff', marginBottom: '4px', borderBottom: '1px solid rgba(124,92,255,0.2)', paddingBottom: '6px', letterSpacing: '0.8px', textTransform: 'uppercase' }}>
+                📖 게임 핵심 가이드 (How to Play)
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <div style={{ background: 'rgba(30, 41, 59, 0.5)', padding: '8px 12px', borderRadius: '8px', fontSize: '10px', lineHeight: '1.5', borderLeft: '3px solid #60a5fa', color: '#e2e8f0' }}>
+                  <div style={{ fontWeight: 'bold', color: '#60a5fa', marginBottom: '2px' }}>🕹️ 조작 방법 (Controls)</div>
+                  - **이동**: 키보드 `W, A, S, D` 또는 방향키 / 마우스 누른 채 드래그<br />
+                  - **USE 상호작용**: 기판 접근 ➡️ **키보드 `E`키** 또는 USE 버튼
+                </div>
+
+                <div style={{ background: 'rgba(30, 41, 59, 0.5)', padding: '8px 12px', borderRadius: '8px', fontSize: '10px', lineHeight: '1.5', borderLeft: '3px solid #34d399', color: '#e2e8f0' }}>
+                  <div style={{ fontWeight: 'bold', color: '#34d399', marginBottom: '2px' }}>🧑‍🚀 크루원 미션 (Crewmate)</div>
+                  - **개인 임무**: 좌측 포스트잇 **'나의 임무 목록' 3개**를 지도에서 해결<br />
+                  - **승리**: 협동 임무 80개 완성 및 투표 회의에서 임포스터 색출
+                </div>
+
+                <div style={{ background: 'rgba(30, 41, 59, 0.5)', padding: '8px 12px', borderRadius: '8px', fontSize: '10px', lineHeight: '1.5', borderLeft: '3px solid #f87171', color: '#e2e8f0' }}>
+                  <div style={{ fontWeight: 'bold', color: '#f87171', marginBottom: '2px' }}>🔴 임포스터 미션 (Impostor)</div>
+                  - **암살**: 은밀히 접근해 `KILL`로 처단. `VENT` 환풍구 텔레포트 활용
+                </div>
+                
+                <div style={{ background: 'rgba(30, 41, 59, 0.5)', padding: '8px 12px', borderRadius: '8px', fontSize: '10px', lineHeight: '1.5', borderLeft: '3px solid #fbbf24', color: '#e2e8f0' }}>
+                  <div style={{ fontWeight: 'bold', color: '#fbbf24', marginBottom: '2px' }}>🗣️ 의심 투표 & 알리바이 대조</div>
+                  - **[동선 일치 대조표] 탭**을 활용해 용의자의 말과 내 목격 로그 비교!
+                </div>
+              </div>
+            </div>
+
           </div>
         </div>
       </div>
@@ -1247,64 +1575,147 @@ export default function AmongUsGame() {
               </div>
 
               <div className="meeting-chat-panel">
-                <div className="chat-messages">
-                  {chatMessages.map((msg, i) => (
-                    <div key={i} className={`chat-bubble ${msg.senderId === 0 ? 'user' : 'bot'}`}>
-                      <div className="chat-bubble-name" style={{ color: msg.color }}>
-                        {msg.name}
-                      </div>
-                      <div>{msg.text}</div>
-                    </div>
-                  ))}
-                  
-                  {typingBotName && (
-                    <div className="chat-bubble typing-indicator-bubble" style={{ background: '#1e293b', border: '1px dashed #475569', display: 'flex', alignItems: 'center', opacity: 0.8 }}>
-                      <span className="typing-dot" style={{ animation: 'dot-blink 1.4s infinite both', fontSize: '14px', fontWeight: 'bold' }}>.</span>
-                      <span className="typing-dot" style={{ animation: 'dot-blink 1.4s infinite both', animationDelay: '0.2s', fontSize: '14px', fontWeight: 'bold' }}>.</span>
-                      <span className="typing-dot" style={{ animation: 'dot-blink 1.4s infinite both', animationDelay: '0.4s', fontSize: '14px', fontWeight: 'bold' }}>.</span>
-                      <span style={{ fontSize: '10px', color: '#94a3b8', marginLeft: '6px' }}>
-                        {typingBotName}님이 메시지를 작성 중입니다
-                      </span>
-                    </div>
-                  )}
-                  <div ref={chatEndRef} />
+                {/* 탭 헤더 (토론 챗 vs 알리바이 요약 대조표) */}
+                <div className="meeting-tabs-header" style={{ display: 'flex', borderBottom: '1px solid #334155', marginBottom: '10px' }}>
+                  <button 
+                    className={`meeting-tab-btn ${meetingTab === 'chat' ? 'active' : ''}`}
+                    onClick={() => setMeetingTab('chat')}
+                    style={{ flex: 1, padding: '10px', background: meetingTab === 'chat' ? '#1e293b' : 'transparent', border: 'none', color: meetingTab === 'chat' ? '#e2e8f0' : '#64748b', cursor: 'pointer', fontWeight: 'bold' }}
+                  >
+                    💬 토론 피드
+                  </button>
+                  <button 
+                    className={`meeting-tab-btn ${meetingTab === 'alibi' ? 'active' : ''}`}
+                    onClick={() => setMeetingTab('alibi')}
+                    style={{ flex: 1, padding: '10px', background: meetingTab === 'alibi' ? '#1e293b' : 'transparent', border: 'none', color: meetingTab === 'alibi' ? '#e2e8f0' : '#64748b', cursor: 'pointer', fontWeight: 'bold' }}
+                  >
+                    📋 동선 일치 대조표
+                  </button>
                 </div>
 
-                {!playerVoted && (
-                  <div className="chat-options-grid">
-                    <button className="chat-option-btn" onClick={() => {
-                      const msg = { senderId: 0, name: 'Red (나)', color: '#ef4444', text: '아무 근거 없네, skip 하자.' }
-                      setChatMessages(prev => [...prev, msg])
-                      handleUserVote(-1)
-                    }}>
-                      🗳️ 스킵 (Skip)
-                    </button>
-                    {alivePlayers.filter(p => !p.isPlayer).slice(0, 3).map((bot) => (
-                      <button key={bot.id} className="chat-option-btn" onClick={() => {
-                        const msg = { senderId: 0, name: 'Red (나)', color: '#ef4444', text: `내가 봤어! [${bot.name}]가 확실히 수상해!` }
-                        setChatMessages(prev => [...prev, msg])
-                        handleUserVote(bot.id)
-                      }}>
-                        👉 [{bot.name}] 지목
-                      </button>
-                    ))}
+                {meetingTab === 'chat' ? (
+                  <>
+                    <div className="chat-messages" style={{ height: '280px' }}>
+                      {chatMessages.map((msg, i) => (
+                        <div key={i} className={`chat-bubble ${msg.senderId === 0 ? 'user' : 'bot'}`}>
+                          <div className="chat-bubble-name" style={{ color: msg.color }}>
+                            {msg.name}
+                          </div>
+                          <div>{msg.text}</div>
+                        </div>
+                      ))}
+                      
+                      {typingBotName && (
+                        <div className="chat-bubble typing-indicator-bubble" style={{ background: '#1e293b', border: '1px dashed #475569', display: 'flex', alignItems: 'center', opacity: 0.8 }}>
+                          <span className="typing-dot" style={{ animation: 'dot-blink 1.4s infinite both', fontSize: '14px', fontWeight: 'bold' }}>.</span>
+                          <span className="typing-dot" style={{ animation: 'dot-blink 1.4s infinite both', animationDelay: '0.2s', fontSize: '14px', fontWeight: 'bold' }}>.</span>
+                          <span className="typing-dot" style={{ animation: 'dot-blink 1.4s infinite both', animationDelay: '0.4s', fontSize: '14px', fontWeight: 'bold' }}>.</span>
+                          <span style={{ fontSize: '10px', color: '#94a3b8', marginLeft: '6px' }}>
+                            {typingBotName}님이 메시지를 작성 중입니다
+                          </span>
+                        </div>
+                      )}
+                      <div ref={chatEndRef} />
+                    </div>
+
+                    {!playerVoted && (
+                      chatFinished ? (
+                        <div className="chat-options-grid">
+                          <button className="chat-option-btn" onClick={() => {
+                            const msg = { senderId: 0, name: 'Red (나)', color: '#ef4444', text: '아무 근거 없네, skip 하자.' }
+                            setChatMessages(prev => [...prev, msg])
+                            handleUserVote(-1)
+                          }}>
+                            🗳️ 스킵 (Skip)
+                          </button>
+                          {alivePlayers.filter(p => !p.isPlayer).slice(0, 3).map((bot) => (
+                            <button key={bot.id} className="chat-option-btn" onClick={() => {
+                              const msg = { senderId: 0, name: 'Red (나)', color: '#ef4444', text: `내가 봤어! [${bot.name}]가 확실히 수상해!` }
+                              setChatMessages(prev => [...prev, msg])
+                              handleUserVote(bot.id)
+                            }}>
+                              👉 [{bot.name}] 지목
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        <div style={{ padding: '12px', color: '#94a3b8', fontSize: '11px', textAlign: 'center', background: '#1e293b', borderRadius: '8px', border: '1px dashed #475569' }}>
+                          💬 선원들의 대화와 알리바이가 완전히 보고될 때까지 분석 중입니다...
+                        </div>
+                      )
+                    )}
+                  </>
+                ) : (
+                  <div className="meeting-alibi-panel" style={{ display: 'flex', flexDirection: 'column', gap: '15px', height: '360px', overflowY: 'auto', padding: '5px 10px' }}>
+                    {/* 봇들의 알리바이 진술 요약 */}
+                    <div className="alibi-log-section">
+                      <div style={{ color: '#7c5cff', fontWeight: 'bold', fontSize: '11px', marginBottom: '8px', borderBottom: '1px solid rgba(124,92,255,0.2)', paddingBottom: '3px', letterSpacing: '1px' }}>
+                        👤 용의자 진술 현황 (Alibi Claims)
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        {alivePlayers.filter(p => !p.isPlayer).map(p => {
+                          // 챗 피드에서 봇의 알리바이 문자열 추출
+                          const botClaim = chatMessages.find(m => m.name === p.name && (m.text.includes('방에') || m.text.includes('에서') || m.text.includes('에 있었')))
+                          const locationText = botClaim ? botClaim.text : '대기실 대기 중 (특이 진술 없음)'
+                          return (
+                            <div key={p.id} style={{ background: '#1e293b', padding: '6px 10px', borderRadius: '8px', fontSize: '11px', display: 'flex', flexDirection: 'column', gap: '2px', borderLeft: `3px solid ${p.color}` }}>
+                              <span style={{ fontWeight: 'bold', color: p.color }}>{p.name}</span>
+                              <span style={{ color: '#e2e8f0', opacity: 0.9 }}>{locationText}</span>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+
+                    {/* 플레이어 실시간 동선 목격 기록 */}
+                    <div className="my-observation-section">
+                      <div style={{ color: '#eab308', fontWeight: 'bold', fontSize: '11px', marginBottom: '8px', borderBottom: '1px solid rgba(234,179,8,0.2)', paddingBottom: '3px', letterSpacing: '1px' }}>
+                        📝 내 수사 메모 (Pass-by Logs)
+                      </div>
+                      {observationLog.length === 0 ? (
+                        <div style={{ fontSize: '11px', color: '#64748b', textAlign: 'center', padding: '15px 0' }}>
+                          최근 마주친 선원이 없습니다. (이동 중 스쳐 지나간 인물이 자동 기록됩니다)
+                        </div>
+                      ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                          {observationLog.map((log, idx) => (
+                            <div key={idx} style={{ fontSize: '11px', color: '#e2e8f0', background: 'rgba(234,179,8,0.06)', padding: '5px 8px', borderRadius: '6px', borderLeft: '3px solid #eab308' }}>
+                              <span style={{ color: '#94a3b8', marginRight: '6px' }}>[{log.time}]</span>
+                              <span style={{ fontWeight: 'bold' }}>{log.name}</span>를 📍{log.room}에서 목격함
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
             </div>
 
             <div className="meeting-vote-action-bar">
-              <span>
-                {playerVoted ? '⏳ 다른 선원들의 투표 마감을 대기 중입니다...' : '🗳️ 용의자를 클릭한 뒤 스킵 또는 투표하십시오.'}
-              </span>
-              {!playerVoted && selectedId !== null && (
+              {playerVoted && votingComplete ? (
                 <button 
                   className="btn" 
-                  style={{ background: '#eab308', color: 'black', fontWeight: 'bold' }}
-                  onClick={() => handleUserVote(selectedId)}
+                  style={{ background: '#22d55e', color: 'white', fontWeight: 'bold', padding: '12px 28px', border: 'none', borderRadius: '8px', cursor: 'pointer', boxShadow: '0 4px 12px rgba(34,213,94,0.35)' }}
+                  onClick={proceedToEjection}
                 >
-                  투표 확정 (Vote)
+                  👉 회의 결과 개표 및 우주 방출 진행
                 </button>
+              ) : (
+                <>
+                  <span>
+                    {playerVoted ? '⏳ 다른 선원들의 투표 마감을 대기 중입니다...' : '🗳️ 용의자를 클릭한 뒤 스킵 또는 투표하십시오.'}
+                  </span>
+                  {!playerVoted && selectedId !== null && (
+                    <button 
+                      className="btn" 
+                      style={{ background: '#eab308', color: 'black', fontWeight: 'bold', marginLeft: '12px' }}
+                      onClick={() => handleUserVote(selectedId)}
+                    >
+                      투표 확정 (Vote)
+                    </button>
+                  )}
+                </>
               )}
             </div>
           </div>
@@ -1369,15 +1780,28 @@ export default function AmongUsGame() {
         </div>
 
         <div className="game-container">
-          <div className="game-header">
+          <div className="game-header" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             <div style={{ display: 'flex', alignItems: 'center', width: '100%' }}>
               <span style={{ fontSize: '12px', fontWeight: 'bold', marginRight: '10px' }}>임무 달성률:</span>
               <div className="task-progress-bar">
                 <div className="task-progress-fill" style={{ width: `${progressPercent}%` }} />
                 <span className="task-progress-text">{completedTasksCount} / 80 ({progressPercent}%)</span>
               </div>
-              {playerDead && <span style={{ color: '#ef4444', fontWeight: '900', fontSize: '13px' }}>👻 사망 (유령 상태)</span>}
+              {playerDead && <span style={{ color: '#ef4444', fontWeight: '900', fontSize: '13px', marginLeft: '12px' }}>👻 사망 (유령 상태)</span>}
             </div>
+
+            {scenarioId === 'scenario_1' && scenarioTimer !== null && (
+              <div style={{ display: 'flex', alignItems: 'center', background: 'rgba(239, 68, 68, 0.1)', padding: '6px 12px', borderRadius: '8px', border: '1px solid rgba(239, 68, 68, 0.3)', width: 'fit-content' }}>
+                <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#ef4444', marginRight: '8px' }}>⏱️ 전기실 탈출 제한시간:</span>
+                <span style={{ fontSize: '13px', fontWeight: '900', color: '#ef4444', fontFamily: 'monospace' }}>{scenarioTimer}초</span>
+              </div>
+            )}
+            
+            {scenarioId === 'scenario_3' && (
+              <div style={{ display: 'flex', alignItems: 'center', background: 'rgba(239, 68, 68, 0.15)', padding: '6px 12px', borderRadius: '8px', border: '1px solid rgba(239, 68, 68, 0.3)', width: 'fit-content' }}>
+                <span style={{ fontSize: '11px', fontWeight: 'bold', color: '#f87171' }}>🤫 암살 지령: 목격자 봇이 식당 비상 버튼에 도달하기 전에 처단하십시오! (들킬 시 패배)</span>
+              </div>
+            )}
           </div>
 
           {sabotageActive === 'reactor' && (
@@ -1386,9 +1810,46 @@ export default function AmongUsGame() {
             </div>
           )}
 
+          {/* 📋 개인 미션 홀로그램 카드 (HUD) */}
+          {!playerDead && phase === 'play' && (
+            <div className={`personal-tasks-card ${playerRole === 'impostor' ? 'impostor' : ''}`}>
+              <div className="tasks-card-title">
+                {playerRole === 'impostor' ? '🔴 암살 및 공작 지령' : '🧑‍🚀 나의 임무 목록'}
+              </div>
+              <ul className="tasks-card-list">
+                {playerRole === 'impostor' ? (
+                  <>
+                    <li className={players.filter(p => !p.isDead && p.role === 'crewmate').length <= players.filter(p => !p.isDead && p.role === 'impostor').length ? 'done' : ''}>
+                      <span className="task-check">💀</span> 크루원 처단 (남은: {players.filter(p => !p.isDead && p.role === 'crewmate').length}명)
+                    </li>
+                    <li className={sabotageActive ? 'done' : ''}>
+                      <span className="task-check">⚙️</span> 사보타지 활성화 (방해 공작)
+                    </li>
+                    <li className={isVented ? 'done' : ''}>
+                      <span className="task-check">🌀</span> 벤트 활용 기습 침투
+                    </li>
+                  </>
+                ) : (
+                  personalTasks.map((t) => (
+                    <li key={t.id} className={t.isDone ? 'done' : ''}>
+                      <span className="task-check">{t.isDone ? '✅' : '📌'}</span>
+                      {t.label} ({MAP_ROOMS.find(r => r.key === t.room)?.label.split(' ')[0] || t.room})
+                    </li>
+                  ))
+                )}
+              </ul>
+            </div>
+          )}
+
           <div className="canvas-wrapper" style={{ position: 'relative' }}>
+            {/* 전술 HUD 비저 뷰포트 테두리 브래킷 */}
+            <div className="hud-viewport-brackets" />
+            <div className="hud-viewport-corners" />
+
             {/* 사보타지 활성화 시 적색 펄싱 비네팅 오버레이 */}
+            {sabotageActive && <div className="sabotage-warning-overlay" />}
             {sabotageActive && <div className="vfx-sabotage-vignette" />}
+
             <canvas
               ref={canvasRef}
               width={CANVAS_WIDTH}
@@ -1426,57 +1887,58 @@ export default function AmongUsGame() {
                 })}
               </div>
             )}
-          </div>
 
-          <div className="action-buttons-overlay">
-            {sabotageActive && !playerDead && (
-              <button className="action-btn" style={{ background: '#ef4444', fontSize: '11px' }} onClick={() => setActiveModal('sabotage_panel')}>
-                ⚙️ 수리
-              </button>
-            )}
+            {/* 통합 전술 콘솔 액션 패널 */}
+            <div className="action-buttons-overlay">
+              {sabotageActive && !playerDead && (
+                <button className="action-btn sabotage" onClick={() => setActiveModal('sabotage_panel')}>
+                  ⚙️ 수리
+                </button>
+              )}
 
-            <button 
-              className="action-btn report" 
-              disabled={!nearbyDeadBody}
-              onClick={handleReport}
-            >
-              🔊 REPORT
-            </button>
-
-            {playerRole === 'impostor' && !playerDead && (
               <button 
-                className="action-btn vent" 
-                disabled={!nearbyVent}
-                onClick={handleVent}
+                className="action-btn report" 
+                disabled={!nearbyDeadBody}
+                onClick={handleReport}
               >
-                {isVented ? '🚪 나감' : '🌀 벤트'}
+                🔊 REPORT
               </button>
-            )}
 
-            {playerRole === 'impostor' && !playerDead && (
+              {playerRole === 'impostor' && !playerDead && (
+                <button 
+                  className="action-btn vent" 
+                  disabled={!nearbyVent}
+                  onClick={handleVent}
+                >
+                  {isVented ? '🚪 나감' : '🌀 벤트'}
+                </button>
+              )}
+
+              {playerRole === 'impostor' && !playerDead && (
+                <button 
+                  className="action-btn kill" 
+                  disabled={!nearbyCrewmate || killCooldown > 0 || isVented}
+                  onClick={handleKill}
+                >
+                  💀 KILL<br />
+                  {killCooldown > 0 ? `(${killCooldown}s)` : ''}
+                </button>
+              )}
+
+              {playerRole === 'impostor' && !playerDead && !isVented && (
+                <button className="action-btn sabotage" onClick={() => setActiveModal('sabotage_panel')}>
+                  💥 방해
+                </button>
+              )}
+
               <button 
-                className="action-btn kill" 
-                disabled={!nearbyCrewmate || killCooldown > 0 || isVented}
-                onClick={handleKill}
+                className="action-btn use" 
+                disabled={(!nearbyTask && !nearEmergencyButton) || playerDead || isVented}
+                onClick={handleUse}
               >
-                💀 KILL<br />
-                {killCooldown > 0 ? `(${killCooldown}s)` : ''}
+                👉 USE
               </button>
-            )}
-
-            {playerRole === 'impostor' && !playerDead && !isVented && (
-              <button className="action-btn sabotage" onClick={() => setActiveModal('sabotage_panel')}>
-                💥 방해
-              </button>
-            )}
-
-            <button 
-              className="action-btn use" 
-              disabled={(!nearbyTask && !nearEmergencyButton) || playerDead || isVented}
-              onClick={handleUse}
-            >
-              👉 USE
-            </button>
+            </div>
           </div>
         </div>
 

@@ -8,4 +8,8 @@ export default defineConfig({
     port: 5173,
     open: false,
   },
+  test: {
+    globals: true,
+    environment: 'jsdom',
+  },
 })

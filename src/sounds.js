@@ -13,17 +13,27 @@ let bgmVolume = 0.6
 let sfxVolume = 0.8
 
 function getCtx() {
-  if (!ctx) {
-    const AC = window.AudioContext || window.webkitAudioContext
-    ctx = new AC()
-    setupAudioGraph()
+  if (typeof window === 'undefined') return null
+  try {
+    if (!ctx) {
+      const AC = window.AudioContext || window.webkitAudioContext
+      if (AC) {
+        ctx = new AC()
+        setupAudioGraph()
+      }
+    }
+    if (ctx && ctx.state === 'suspended') {
+      ctx.resume().catch(() => {})
+    }
+  } catch (e) {
+    console.warn('Failed to initialize AudioContext:', e)
   }
-  if (ctx.state === 'suspended') ctx.resume()
   return ctx
 }
 
 function setupAudioGraph() {
   const ac = ctx
+  if (!ac) return
   // 마스터 게인
   masterGain = ac.createGain()
   masterGain.gain.value = masterVolume
@@ -48,37 +58,40 @@ function setupAudioGraph() {
 }
 
 export function unlockAudio() {
-  getCtx()
+  try {
+    getCtx()
+  } catch (e) {
+    console.warn('Failed to unlock audio:', e)
+  }
 }
 
 // 실시간 볼륨 설정 API
 export function setMasterVolume(vol) {
   masterVolume = Math.max(0, Math.min(1, vol))
-  if (masterGain) {
-    masterGain.gain.setValueAtTime(masterVolume, getCtx().currentTime)
+  if (ctx && masterGain) {
+    masterGain.gain.setValueAtTime(masterVolume, ctx.currentTime)
   }
 }
 
 export function setBgmVolume(vol) {
   bgmVolume = Math.max(0, Math.min(1, vol))
-  if (bgmGain) {
-    bgmGain.gain.setValueAtTime(bgmVolume, getCtx().currentTime)
+  if (ctx && bgmGain) {
+    bgmGain.gain.setValueAtTime(bgmVolume, ctx.currentTime)
   }
 }
 
 export function setSfxVolume(vol) {
   sfxVolume = Math.max(0, Math.min(1, vol))
-  if (sfxGain) {
-    sfxGain.gain.setValueAtTime(sfxVolume, getCtx().currentTime)
+  if (ctx && sfxGain) {
+    sfxGain.gain.setValueAtTime(sfxVolume, ctx.currentTime)
   }
 }
 
 // 🚨 사보타지 필터 활성화 (BGM을 먹먹하게 웅웅거리도록)
 export function setSabotageFilter(active) {
   try {
-    const ac = getCtx()
-    const t = ac.currentTime
-    if (!bgmFilter) return
+    if (!ctx || !bgmFilter) return
+    const t = ctx.currentTime
 
     if (active) {
       // 350Hz 저역 통과 필터로 고역대 완전 컷 (사보타지 긴박감 연출)
