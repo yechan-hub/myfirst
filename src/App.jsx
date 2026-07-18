@@ -1,9 +1,11 @@
 import { useState } from 'react'
 import LadderGame from './LadderGame.jsx'
 import MysteryGame from './MysteryGame.jsx'
+import AmongUsGame from './AmongUsGame.jsx'
 
 const GAMES = [
   { id: 'mystery', emoji: '🕵️', title: '명탐정 추리 게임', desc: '단서를 모아 범인을 찾아라!' },
+  { id: 'amongus', emoji: '🚀', title: '어몽어스 우주선 게임', desc: '선원 속에 숨은 임포스터를 찾아라!' },
   { id: 'ladder', emoji: '🪜', title: '사다리 게임', desc: '운명의 사다리 타기' },
 ]
 
@@ -16,7 +18,13 @@ export default function App() {
         <button className="btn back-btn" onClick={() => setGame(null)}>
           ← 게임 목록
         </button>
-        {game === 'ladder' ? <LadderGame /> : <MysteryGame />}
+        {game === 'ladder' ? (
+          <LadderGame />
+        ) : game === 'amongus' ? (
+          <AmongUsGame />
+        ) : (
+          <MysteryGame />
+        )}
       </>
     )
   }

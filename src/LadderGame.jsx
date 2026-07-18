@@ -35,6 +35,10 @@ export default function LadderGame() {
   const [drawn, setDrawn] = useState(null) // 진행 중 경로 {pts, color}
   const [chanceMark, setChanceMark] = useState(null) // {x, y}
   const [prompt, setPrompt] = useState(null) // {decide, remainingCount}
+  const [viewBox, setViewBox] = useState({ x: 0, y: 0, w: W, h: H })
+  const [activeCol, setActiveCol] = useState(null)
+  const [screenMode, setScreenMode] = useState('playing') // 'playing' | 'result'
+  const [copied, setCopied] = useState(false)
   const rafRef = useRef(0)
 
   // 게임 시작 여부: 시작되면 이름/결과/설정 잠금 (공정성)
@@ -56,6 +60,9 @@ export default function LadderGame() {
     setChanceMark(null)
     setPrompt(null)
     setAnimating(false)
+    setViewBox({ x: 0, y: 0, w: W, h: H })
+    setActiveCol(null)
+    setScreenMode('playing')
   }
 
   function changePlayers(n) {
@@ -213,6 +220,23 @@ export default function LadderGame() {
         }
         setToken({ x: cx, y: cy, emoji: char.emoji, color: char.color })
         setDrawn({ pts: committed.concat(pts.slice(0, passed + 1), [{ x: cx, y: cy }]), color: char.color })
+
+        // 🎥 Smoothly pan and zoom camera viewBox centered on the active token
+        const targetW = 360
+        const targetH = 360
+        const targetX = Math.max(0, Math.min(W - targetW, cx - targetW / 2))
+        const targetY = Math.max(0, Math.min(H - targetH, cy - targetH / 2))
+        setViewBox((prev) => ({
+          x: prev.x + (targetX - prev.x) * 0.1,
+          y: prev.y + (targetY - prev.y) * 0.1,
+          w: prev.w + (targetW - prev.w) * 0.1,
+          h: prev.h + (targetH - prev.h) * 0.1,
+        }))
+
+        // 📊 Predict and update the active column index in real-time
+        const colIndex = Math.round((cx - PAD_X) / colGap)
+        setActiveCol((prev) => (prev !== colIndex ? colIndex : prev))
+
         if (p < 1) rafRef.current = requestAnimationFrame(frame)
         else onDone()
       }
@@ -224,8 +248,18 @@ export default function LadderGame() {
       setDrawn(null)
       setChanceMark(null)
       setTraces((t) => [...t, { points: fullPts, color: char.color }])
-      setRevealed((r) => ({ ...r, [startCol]: endCol }))
+      setRevealed((r) => {
+        const next = { ...r, [startCol]: endCol }
+        if (Object.keys(next).length === numPlayers) {
+          setTimeout(() => {
+            setScreenMode('result')
+          }, 1000)
+        }
+        return next
+      })
       setAnimating(false)
+      setViewBox({ x: 0, y: 0, w: W, h: H })
+      setActiveCol(null)
       playWin() // 🎉
     }
 
@@ -294,6 +328,34 @@ export default function LadderGame() {
     })
   }
 
+  const copyToClipboard = () => {
+    const text = Object.entries(revealed)
+      .map(([sc, ec]) => `${CHARACTERS[sc].emoji} ${names[sc]} → ${results[ec]}`)
+      .join('\n')
+    const fullText = `🪜 사다리 게임 결과 🪜\n\n${text}`
+    navigator.clipboard.writeText(fullText).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    }).catch(() => {
+      const textArea = document.createElement("textarea")
+      textArea.value = fullText
+      textArea.style.position = "fixed"
+      textArea.style.left = "-999999px"
+      textArea.style.top = "-999999px"
+      document.body.appendChild(textArea)
+      textArea.focus()
+      textArea.select()
+      try {
+        document.execCommand('copy')
+        setCopied(true)
+        setTimeout(() => setCopied(false), 2000)
+      } catch (err) {
+        console.error("Fallback: Copying failed", err)
+      }
+      document.body.removeChild(textArea)
+    })
+  }
+
   useEffect(() => () => cancelAnimationFrame(rafRef.current), [])
 
   // 세로줄(레인) — 사다리 칸은 숨김
@@ -307,218 +369,306 @@ export default function LadderGame() {
 
   const ptStr = (pts) => pts.map((p) => `${p.x},${p.y}`).join(' ')
 
+  // Celebrating results overlay screen view
+  const resultOverlay = screenMode === 'result' && (
+    <div className="prompt-overlay">
+      <div className="confetti-container">
+        {Array.from({ length: 30 }).map((_, i) => (
+          <div key={i} className={`confetti-piece p${i}`} />
+        ))}
+      </div>
+
+      <div className="result-card">
+        <div className="result-icon-main">🏆</div>
+        <h2>FINAL RESULTS</h2>
+        <div className="result-list">
+          {Object.entries(revealed).map(([sc, ec]) => (
+            <div key={sc} className="result-item">
+              <div className="result-player">
+                <span className="res-emoji">{CHARACTERS[sc].emoji}</span>
+                <span className="res-name">{names[sc]}</span>
+              </div>
+              <div className="res-arrow">→</div>
+              <div className="result-outcome">
+                <span className="res-text">{results[ec]}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="result-actions">
+          <button className="btn copy-results-btn" onClick={copyToClipboard}>
+            {copied ? '✅ 복사 완료!' : '📋 결과 복사'}
+          </button>
+          <button className="btn play-again-btn" onClick={() => { reset(); setScreenMode('playing'); }}>
+            CLOSE
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+
   return (
-    <div className="app">
-      <header>
-        <h1>🪜 사다리 게임</h1>
-        <p className="sub">
-          사다리 칸은 비밀! 캐릭터를 눌러 직접 타보세요 · 🔫 총소리 · 🎇 음속 채찍 · 🎲 찬스 게이트
-        </p>
+    <div className="app unified-dashboard">
+      <header className="dashboard-header">
+        <div className="logo-area">
+          <div className="logo-icon">L</div>
+          <div className="logo-text">
+            <span className="logo-main">LADDER</span>
+            <span className="logo-sub">GAME</span>
+          </div>
+        </div>
+
+        {/* Hero Avatars Section */}
+        <div className="hero-avatars-row">
+          {Array.from({ length: numPlayers }).map((_, c) => {
+            const char = CHARACTERS[c]
+            return (
+              <div key={c} className="hero-avatar-chip">
+                <div className="avatar-circle" style={{ borderColor: char.color, boxShadow: `0 0 15px ${char.color}33` }}>
+                  <span className="avatar-emoji">{char.emoji}</span>
+                </div>
+                <span className="avatar-name" style={{ color: char.color }}>{names[c]}</span>
+              </div>
+            )
+          })}
+        </div>
       </header>
 
-      <div className="controls">
-        <div className="player-select">
-          <span>참가자</span>
-          {[2, 3, 4, 5, 6].map((n) => (
-            <button
-              key={n}
-              className={n === numPlayers ? 'chip active' : 'chip'}
-              onClick={() => changePlayers(n)}
-              disabled={started}
-            >
-              {n}명
-            </button>
-          ))}
-        </div>
-        <div className="actions">
-          <button className="btn" onClick={() => reset()} disabled={animating}>
-            🔀 새 사다리
-          </button>
-          <button className="btn" onClick={shuffleResults} disabled={started}>
-            🎲 결과 섞기
-          </button>
-        </div>
-      </div>
+      {/* GAME SETUP TITLE */}
+      <h2 className="setup-title-main">GAME SETUP</h2>
 
-      <div className="controls">
-        <div className="player-select">
-          <span>찬스 게이트</span>
-          {[
-            ['off', '끔'],
-            ['auto', '자동'],
-            ['ask', '선택(Yes/No)'],
-          ].map(([val, label]) => (
-            <button
-              key={val}
-              className={val === chanceMode ? 'chip active' : 'chip'}
-              onClick={() => setChanceMode(val)}
-              disabled={started}
-              title={
-                val === 'off'
-                  ? '찬스 없이 순수 사다리'
-                  : val === 'auto'
-                  ? '게이트에서 자동으로 다시 뽑기'
-                  : '게이트에서 직접 Yes/No 선택'
-              }
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="board">
-        <svg viewBox={`0 0 ${W} ${H}`} className="ladder-svg">
-          {/* 상단 캐릭터 */}
-          {Array.from({ length: numPlayers }, (_, c) => {
-            const char = CHARACTERS[c]
-            const done = revealed[c] !== undefined
-            return (
-              <g
-                key={c}
-                className={`char-top ${animating ? 'locked' : ''} ${done ? 'done' : ''}`}
-                onClick={() => play(c)}
-              >
-                <circle cx={x(c)} cy={LADDER_TOP - 52} r={26} style={{ fill: char.color }} />
-                <text x={x(c)} y={LADDER_TOP - 52} className="emoji" fontSize="30">
-                  {char.emoji}
-                </text>
-                <text x={x(c)} y={LADDER_TOP - 14} className="label">
-                  {names[c]}
-                </text>
-              </g>
-            )
-          })}
-
-          {rails}
-
-          {/* 완료된 경로(=탄 사람들 것만) */}
-          {traces.map((tr, i) => (
-            <polyline key={i} points={ptStr(tr.points)} className="trace done-trace" style={{ stroke: tr.color }} />
-          ))}
-
-          {/* 진행 중 경로 */}
-          {drawn && <polyline points={ptStr(drawn.pts)} className="trace" style={{ stroke: drawn.color }} />}
-
-          {/* 찬스 게이트 마커 */}
-          {chanceMark && (
-            <g className="chance-mark">
-              <circle cx={chanceMark.x} cy={chanceMark.y} r={20} className="chance-ring" />
-              <text x={chanceMark.x} y={chanceMark.y} className="emoji" fontSize="22">
-                🎲
-              </text>
-              <text x={chanceMark.x} y={chanceMark.y - 32} className="chance-label">
-                찬스!
-              </text>
-            </g>
-          )}
-
-          {/* 도착한 캐릭터 표시 */}
-          {Object.entries(revealed).map(([sc, ec]) => (
-            <g key={sc} className="landed">
-              <circle cx={x(ec)} cy={LADDER_BOTTOM} r={16} style={{ fill: CHARACTERS[sc].color }} />
-              <text x={x(ec)} y={LADDER_BOTTOM} className="emoji" fontSize="20">
-                {CHARACTERS[sc].emoji}
-              </text>
-            </g>
-          ))}
-
-          {/* 움직이는 토큰 */}
-          {token && (
-            <g className="token">
-              <circle cx={token.x} cy={token.y} r={20} style={{ fill: token.color }} />
-              <text x={token.x} y={token.y} className="emoji" fontSize="24">
-                {token.emoji}
-              </text>
-            </g>
-          )}
-
-          {/* 하단 결과 */}
-          {Array.from({ length: numPlayers }, (_, c) => {
-            const isHit = Object.values(revealed).includes(c)
-            return (
-              <g key={c} className={`result ${isHit ? 'hit' : ''}`}>
-                <rect x={x(c) - 44} y={LADDER_BOTTOM + 16} width={88} height={40} rx={10} className="result-box" />
-                <text x={x(c)} y={LADDER_BOTTOM + 36} className="result-text">
-                  {results[c]}
-                </text>
-              </g>
-            )
-          })}
-        </svg>
-
-        {/* Yes/No 찬스 프롬프트 */}
-        {prompt && (
-          <div className="prompt-overlay">
-            <div className="prompt-card">
-              <div className="prompt-emoji">🎲</div>
-              <p className="prompt-title">찬스 게이트!</p>
-              <p className="prompt-desc">
-                남은 결과 {prompt.remainingCount}개 중 하나로 다시 뽑을까요?
-                <br />
-                <span className="prompt-hint">(결과는 아직 비밀 — 블라인드!)</span>
-              </p>
-              <div className="prompt-btns">
-                <button className="btn yes" onClick={() => prompt.decide(true)}>
-                  🎲 다시 뽑기!
-                </button>
-                <button className="btn no" onClick={() => prompt.decide(false)}>
-                  🚶 그대로 가기
-                </button>
+      {/* PLAYER CONFIGURATION CARD */}
+      <div className="setup-card-unified">
+        <div className="setup-header-row">
+          <span className="setup-section-cyan">PLAYER NAMES</span>
+          <div className="setup-controls-inline">
+            <div className="control-group">
+              <span className="control-label">Players:</span>
+              <div className="mini-chip-group">
+                {[2, 3, 4, 5, 6].map((n) => (
+                  <button
+                    key={n}
+                    className={n === numPlayers ? 'mini-chip active' : 'mini-chip'}
+                    onClick={() => changePlayers(n)}
+                    disabled={started}
+                  >
+                    {n}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="control-group">
+              <span className="control-label">Gate:</span>
+              <div className="mini-chip-group">
+                {[
+                  ['off', '끔'],
+                  ['auto', '자동'],
+                  ['ask', '선택'],
+                ].map(([val, label]) => (
+                  <button
+                    key={val}
+                    className={val === chanceMode ? 'mini-chip active' : 'mini-chip'}
+                    onClick={() => setChanceMode(val)}
+                    disabled={started}
+                  >
+                    {label}
+                  </button>
+                ))}
               </div>
             </div>
           </div>
-        )}
-      </div>
+        </div>
 
-      {/* 이름 편집 */}
-      <div className="editor">
-        <span className="editor-title">이름 편집 {started && <em>(게임 중 잠김)</em>}</span>
-        <div className="editor-grid">
+        {/* Card-style inputs matching design note exactly */}
+        <div className="editor-grid-cards">
           {names.map((nm, i) => (
-            <div key={i} className="name-cell">
-              <span className="name-emoji">{CHARACTERS[i].emoji}</span>
-              <input
-                value={nm}
-                disabled={started}
-                maxLength={8}
-                onChange={(e) => setNames((prev) => prev.map((v, idx) => (idx === i ? e.target.value : v)))}
-              />
+            <div key={i} className="player-name-card">
+              <span className="card-player-label">Player {i + 1} {i === 0 ? "(You)" : ""}</span>
+              <div className="card-input-box">
+                <span className="name-emoji">{CHARACTERS[i].emoji}</span>
+                <input
+                  value={nm}
+                  disabled={started}
+                  maxLength={8}
+                  onChange={(e) => setNames((prev) => prev.map((v, idx) => (idx === i ? e.target.value : v)))}
+                />
+              </div>
             </div>
           ))}
         </div>
-      </div>
 
-      {/* 결과 편집 */}
-      <div className="editor">
-        <span className="editor-title">결과 편집 {started && <em>(게임 중 잠김)</em>}</span>
-        <div className="editor-grid">
-          {results.map((r, i) => (
-            <input
-              key={i}
-              value={r}
-              disabled={started}
-              maxLength={10}
-              onChange={(e) => setResults((prev) => prev.map((v, idx) => (idx === i ? e.target.value : v)))}
-            />
-          ))}
+        {/* Results input fields */}
+        <div className="editor-results-section">
+          <span className="setup-section-cyan">PRIZES / OUTCOMES</span>
+          <div className="editor-grid-results">
+            {results.map((r, i) => (
+              <div key={i} className="result-input-card">
+                <span className="card-player-label">Slot {i + 1}</span>
+                <input
+                  value={r}
+                  disabled={started}
+                  maxLength={10}
+                  onChange={(e) => setResults((prev) => prev.map((v, idx) => (idx === i ? e.target.value : v)))}
+                />
+              </div>
+            ))}
+          </div>
         </div>
       </div>
 
-      {/* 결과 요약 */}
-      {Object.keys(revealed).length > 0 && (
-        <div className="summary">
-          {Object.entries(revealed).map(([sc, ec]) => (
-            <div key={sc} className="summary-row">
-              <span>
-                {CHARACTERS[sc].emoji} {names[sc]}
-              </span>
-              <span className="arrow">→</span>
-              <strong>{results[ec]}</strong>
+      {/* LADDER & RESULTS TITLE */}
+      <h2 className="setup-title-main">LADDER & RESULTS</h2>
+
+      <div className="board-and-results-grid">
+        {/* Left: Ladder Board */}
+        <div className="board-card-unified">
+          <svg viewBox={`${viewBox.x} ${viewBox.y} ${viewBox.w} ${viewBox.h}`} className={`ladder-svg ${animating ? 'focus-active' : ''}`}>
+            {/* 상단 캐릭터 */}
+            {Array.from({ length: numPlayers }, (_, c) => {
+              const char = CHARACTERS[c]
+              const done = revealed[c] !== undefined
+              return (
+                <g
+                  key={c}
+                  className={`char-top ${animating ? 'locked' : ''} ${done ? 'done' : ''}`}
+                  onClick={() => play(c)}
+                >
+                  <circle cx={x(c)} cy={LADDER_TOP - 52} r={26} style={{ fill: char.color }} />
+                  <text x={x(c)} y={LADDER_TOP - 52} className="emoji" fontSize="30">
+                    {char.emoji}
+                  </text>
+                  <text x={x(c)} y={LADDER_TOP - 14} className="label">
+                    {names[c]}
+                  </text>
+                </g>
+              )
+            })}
+
+            {rails}
+
+            {/* 완료된 경로(=탄 사람들 것만) */}
+            {traces.map((tr, i) => (
+              <polyline key={i} points={ptStr(tr.points)} className="trace done-trace" style={{ stroke: tr.color }} />
+            ))}
+
+            {/* 진행 중 경로 */}
+            {drawn && <polyline points={ptStr(drawn.pts)} className="trace" style={{ stroke: drawn.color }} />}
+
+            {/* 찬스 게이트 마커 */}
+            {chanceMark && (
+              <g className="chance-mark">
+                <circle cx={chanceMark.x} cy={chanceMark.y} r={20} className="chance-ring" />
+                <text x={chanceMark.x} y={chanceMark.y} className="emoji" fontSize="22">
+                  🎲
+                </text>
+                <text x={chanceMark.x} y={chanceMark.y - 32} className="chance-label">
+                  찬스!
+                </text>
+              </g>
+            )}
+
+            {/* 도착한 캐릭터 표시 */}
+            {Object.entries(revealed).map(([sc, ec]) => (
+              <g key={sc} className="landed">
+                <circle cx={x(ec)} cy={LADDER_BOTTOM} r={16} style={{ fill: CHARACTERS[sc].color }} />
+                <text x={x(ec)} y={LADDER_BOTTOM} className="emoji" fontSize="20">
+                  {CHARACTERS[sc].emoji}
+                </text>
+              </g>
+            ))}
+
+            {/* 움직이는 토큰 */}
+            {token && (
+              <g className="token">
+                <circle cx={token.x} cy={token.y} r={20} style={{ fill: token.color }} />
+                <text x={token.x} y={token.y} className="emoji" fontSize="24">
+                  {token.emoji}
+                </text>
+              </g>
+            )}
+
+            {/* 하단 결과 */}
+            {Array.from({ length: numPlayers }, (_, c) => {
+              const isHit = Object.values(revealed).includes(c)
+              const isHighlighted = activeCol === c
+              return (
+                <g key={c} className={`result ${isHit ? 'hit' : ''} ${isHighlighted ? 'glowing-card' : ''}`}>
+                  <rect x={x(c) - 44} y={LADDER_BOTTOM + 16} width={88} height={40} rx={10} className="result-box" />
+                  <text x={x(c)} y={LADDER_BOTTOM + 36} className="result-text">
+                    {results[c]}
+                  </text>
+                </g>
+              )
+            })}
+          </svg>
+
+          {/* Yes/No 찬스 프롬프트 */}
+          {prompt && (
+            <div className="prompt-overlay">
+              <div className="prompt-card">
+                <div className="prompt-emoji">🎲</div>
+                <p className="prompt-title">찬스 게이트!</p>
+                <p className="prompt-desc">
+                  남은 결과 {prompt.remainingCount}개 중 하나로 다시 뽑을까요?
+                  <br />
+                  <span className="prompt-hint">(결과는 아직 비밀 — 블라인드!)</span>
+                </p>
+                <div className="prompt-btns">
+                  <button className="btn yes" onClick={() => prompt.decide(true)}>
+                    🎲 다시 뽑기!
+                  </button>
+                  <button className="btn no" onClick={() => prompt.decide(false)}>
+                    🚶 그대로 가기
+                  </button>
+                </div>
+              </div>
             </div>
-          ))}
+          )}
         </div>
-      )}
+
+        {/* Right: Results list view */}
+        <div className="results-list-unified">
+          <h3 className="results-header-text">RESULTS</h3>
+          <div className="results-items-container">
+            {Object.keys(revealed).length === 0 ? (
+              <div className="results-empty-placeholder">
+                <span className="placeholder-icon">🪜</span>
+                <p>캐릭터를 눌러 사다리를 타보세요!</p>
+              </div>
+            ) : (
+              Object.entries(revealed).map(([sc, ec], i) => (
+                <div key={sc} className="result-item-mock">
+                  <div className="result-item-left">
+                    <span className="res-prefix">START →</span>
+                    <span className="res-name-highlight" style={{ color: CHARACTERS[sc].color }}>
+                      {names[sc]}
+                    </span>
+                    <span className="res-suffix">→ {results[ec]}</span>
+                  </div>
+                  <span className="res-rank-badge">{i + 1}st</span>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Bottom Action Bar matching design mockup */}
+      <div className="bottom-action-bar-unified">
+        <button className="btn nav-btn-purple" onClick={() => reset()}>
+          BACK (RESET)
+        </button>
+        <button className="btn start-game-btn-unified" onClick={() => { if (!started) { alert('캐릭터를 눌러서 한 명씩 사다리를 타보세요! 🪜'); } else { reset(); } }} disabled={animating}>
+          {started ? '🔄 RESET GAME' : 'START GAME ▶'}
+        </button>
+        <button className="btn nav-btn-purple" onClick={shuffleResults} disabled={started}>
+          🎲 SHUFFLE
+        </button>
+      </div>
+
+      {/* Celebrate overlay */}
+      {resultOverlay}
     </div>
   )
 }
