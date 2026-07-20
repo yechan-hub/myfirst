@@ -4249,4 +4249,509 @@ h1 {
   }
 }
 
+/* ===== 🔫 3D 우주선 서바이벌 FPS 게임 스타일 (Starship FPS CSS) ===== */
+
+.fps-game-wrapper {
+  background: #020617;
+  overflow: hidden;
+  user-select: none;
+}
+
+.fps-title-screen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+  min-height: calc(100vh - 80px);
+  text-align: center;
+  z-index: 2;
+  position: relative;
+  max-width: 700px;
+  margin: 0 auto;
+}
+
+.glitch-title {
+  font-size: 38px;
+  font-weight: 900;
+  letter-spacing: 2px;
+  color: #fff;
+  text-shadow: 0 0 20px rgba(56, 189, 248, 0.6);
+  position: relative;
+  margin-bottom: 8px;
+}
+
+.fps-title-screen .subtitle {
+  color: #38bdf8;
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 24px;
+  letter-spacing: 1px;
+}
+
+.mission-briefing {
+  background: rgba(15, 23, 42, 0.75);
+  border: 1px solid #1e293b;
+  border-left: 4px solid #ef4444;
+  border-radius: 6px;
+  padding: 16px;
+  margin-bottom: 20px;
+  text-align: left;
+  line-height: 1.6;
+  font-size: 13px;
+  color: #cbd5e1;
+}
+
+.mission-briefing h3 {
+  margin: 0 0 8px;
+  color: #ef4444;
+  font-size: 14px;
+}
+
+.instruction-box {
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid #1e293b;
+  border-radius: 6px;
+  padding: 14px;
+  width: 100%;
+  margin-bottom: 28px;
+  text-align: left;
+  font-size: 12px;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+  color: #94a3b8;
+}
+
+.instruction-box strong {
+  color: #e2e8f0;
+}
+
+.hologram-btn {
+  background: transparent;
+  color: #67e8f9;
+  border: 2px solid #06b6d4;
+  padding: 12px 28px;
+  font-size: 16px;
+  font-weight: 700;
+  border-radius: 8px;
+  cursor: pointer;
+  box-shadow: 0 0 15px rgba(6, 182, 212, 0.2);
+  transition: all 0.2s ease;
+  letter-spacing: 0.5px;
+}
+
+.hologram-btn:hover {
+  background: #06b6d4;
+  color: #0b0f19;
+  box-shadow: 0 0 25px rgba(6, 182, 212, 0.5);
+  transform: translateY(-2px);
+}
+
+/* 플레이 화면 */
+.fps-play-container {
+  position: relative;
+  width: 100%;
+  height: 100vh;
+  overflow: hidden;
+  background-color: #000;
+}
+
+.fps-canvas-3d {
+  width: 100%;
+  height: calc(100vh - 110px);
+  display: block;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  background-color: #070a13;
+  border-bottom: 2px solid #1e293b;
+}
+
+/* 포인터 락 오버레이 */
+.pointer-lock-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: calc(100vh - 110px);
+  background: rgba(11, 15, 25, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  cursor: pointer;
+}
+
+.lock-box {
+  background: rgba(15, 23, 42, 0.95);
+  border: 2px solid #38bdf8;
+  box-shadow: 0 0 30px rgba(56, 189, 248, 0.3);
+  padding: 24px 36px;
+  border-radius: 12px;
+  text-align: center;
+  animation: pulse-border 2s infinite alternate;
+}
+
+.lock-icon {
+  font-size: 32px;
+  display: block;
+  margin-bottom: 12px;
+}
+
+.lock-box h3 {
+  margin: 0 0 8px;
+  color: #38bdf8;
+}
+
+.lock-box p {
+  margin: 0;
+  color: #64748b;
+  font-size: 12px;
+}
+
+@keyframes pulse-border {
+  from { border-color: #38bdf8; box-shadow: 0 0 15px rgba(56, 189, 248, 0.2); }
+  to { border-color: #06b6d4; box-shadow: 0 0 30px rgba(6, 182, 212, 0.45); }
+}
+
+/* 조준선 */
+.fps-crosshair {
+  position: absolute;
+  top: calc(50% - 55px);
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 16px;
+  height: 16px;
+  pointer-events: none;
+  z-index: 50;
+}
+
+.fps-crosshair::before,
+.fps-crosshair::after {
+  content: '';
+  position: absolute;
+  background: #22c55e;
+  box-shadow: 0 0 4px #22c55e;
+}
+
+.fps-crosshair::before {
+  top: 7px;
+  left: 0;
+  width: 16px;
+  height: 2px;
+}
+
+.fps-crosshair::after {
+  top: 0;
+  left: 7px;
+  width: 2px;
+  height: 16px;
+}
+
+.fps-crosshair .dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #22c55e;
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  box-shadow: 0 0 6px #22c55e;
+}
+
+/* 무기 HUD 위치 */
+.weapon-hud {
+  position: absolute;
+  bottom: 100px;
+  left: 50%;
+  pointer-events: none;
+  z-index: 40;
+}
+
+/* 미니맵 위치 */
+.fps-hud-minimap-container {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 30;
+  pointer-events: none;
+}
+
+/* 상단 정보 로그 피드 */
+.fps-hud-logs {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 450px;
+  pointer-events: none;
+}
+
+.hud-log-line {
+  background: rgba(15, 23, 42, 0.7);
+  border-left: 3px solid #38bdf8;
+  padding: 6px 10px;
+  border-radius: 0 4px 4px 0;
+  font-size: 11px;
+  color: #e2e8f0;
+  font-family: monospace;
+  text-shadow: 0 1px 2px rgba(0,0,0,0.8);
+  animation: fade-in-slide 0.25s ease-out;
+}
+
+@keyframes fade-in-slide {
+  from { opacity: 0; transform: translateX(-15px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+/* 하단 HUD */
+.fps-hud-bottom {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 110px;
+  background: #090d16;
+  border-top: 3px solid #1e293b;
+  display: grid;
+  grid-template-columns: 1.4fr 1.4fr 1.2fr 1fr 0.8fr 1fr;
+  align-items: center;
+  padding: 0 16px;
+  gap: 16px;
+  z-index: 60;
+  box-sizing: border-box;
+}
+
+.hud-metric {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.metric-label {
+  font-size: 9px;
+  font-weight: 700;
+  color: #64748b;
+  letter-spacing: 1px;
+  margin-bottom: 4px;
+}
+
+.metric-bar-wrapper {
+  width: 100%;
+  height: 8px;
+  background: #1e293b;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.metric-bar {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.2s ease-out;
+}
+
+.metric-bar.health {
+  background: linear-gradient(90deg, #ef4444, #f43f5e);
+  box-shadow: 0 0 10px rgba(244, 63, 94, 0.4);
+}
+
+.metric-bar.shield {
+  background: linear-gradient(90deg, #3b82f6, #06b6d4);
+  box-shadow: 0 0 10px rgba(6, 182, 212, 0.4);
+}
+
+.metric-value {
+  font-size: 18px;
+  font-weight: 900;
+  margin-top: 4px;
+  font-family: monospace;
+}
+
+.health-val { color: #f43f5e; }
+.shield-val { color: #38bdf8; }
+.ammo-val { color: #fbbf24; }
+.score-val { color: #10b981; }
+
+.sub-unit {
+  font-size: 10px;
+  color: #64748b;
+  margin-left: 2px;
+}
+
+.hud-weapon-select {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.weapon-select-btn {
+  background: #0f172a;
+  border: 1px solid #1e293b;
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 6px 4px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-align: left;
+}
+
+.weapon-select-btn.active {
+  background: #1e293b;
+  border-color: #fb923c;
+  color: #fb923c;
+  box-shadow: 0 0 8px rgba(251, 146, 60, 0.35);
+}
+
+.hud-inventory {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.keycard-slot {
+  font-size: 8px;
+  font-weight: 800;
+  padding: 4px 6px;
+  border-radius: 3px;
+  border: 1px dashed #1e293b;
+  color: #334155;
+  text-align: center;
+}
+
+.keycard-slot.red.obtained {
+  color: #ef4444;
+  border-color: #ef4444;
+  background: rgba(239, 68, 68, 0.1);
+  box-shadow: 0 0 6px rgba(239, 68, 68, 0.3);
+}
+
+.keycard-slot.blue.obtained {
+  color: #3b82f6;
+  border-color: #3b82f6;
+  background: rgba(59, 130, 246, 0.1);
+  box-shadow: 0 0 6px rgba(59, 130, 246, 0.3);
+}
+
+/* 결과 화면 */
+.fps-result-screen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: calc(100vh - 80px);
+  text-align: center;
+  padding: 20px;
+  z-index: 10;
+  position: relative;
+}
+
+.fps-result-screen.dead {
+  background: radial-gradient(circle, rgba(127, 29, 29, 0.25) 0%, rgba(2, 6, 17, 0) 70%);
+}
+
+.fps-result-screen.win {
+  background: radial-gradient(circle, rgba(6, 95, 70, 0.25) 0%, rgba(2, 6, 17, 0) 70%);
+}
+
+.fps-result-screen .summary-desc {
+  color: #94a3b8;
+  font-size: 14px;
+  margin-bottom: 24px;
+  max-width: 450px;
+  line-height: 1.6;
+}
+
+.stat-results {
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid #1e293b;
+  border-radius: 8px;
+  padding: 16px 32px;
+  margin-bottom: 32px;
+  font-size: 14px;
+  color: #94a3b8;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.stat-results strong {
+  color: #fff;
+  font-size: 18px;
+  margin-left: 6px;
+}
+
+.retry-btn {
+  margin-bottom: 12px;
+  width: 220px;
+}
+
+.fps-result-screen .back-btn {
+  width: 220px;
+  border-color: #475569;
+  color: #94a3b8;
+  box-shadow: none;
+}
+
+.fps-result-screen .back-btn:hover {
+  background: #475569;
+  color: #fff;
+}
+
+.win-title {
+  color: #10b981 !important;
+  text-shadow: 0 0 20px rgba(16, 185, 129, 0.6) !important;
+}
+
+/* 스마트폰 전용 크로스 레이아웃 대응 */
+@media (max-width: 768px) {
+  .fps-hud-bottom {
+    grid-template-columns: 1.2fr 1.2fr 1fr 1fr;
+    height: 130px;
+    padding: 8px;
+    gap: 8px;
+  }
+  
+  .hud-inventory, .score-hud {
+    display: none;
+  }
+}
+
+/* 전술 사운드 보드 버튼 */
+.soundboard-btn {
+  background-color: #292524;
+  border: 1px solid #7c2d12;
+  color: #f5f5f4;
+  padding: 10px 4px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: monospace;
+  font-size: 12px;
+  font-weight: bold;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  transition: all 0.15s ease;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+}
+
+.soundboard-btn:hover {
+  background-color: #44403c;
+  border-color: #d97706;
+  color: #fbbf24;
+  box-shadow: 0 0 10px rgba(217, 119, 6, 0.4);
+  transform: scale(1.02);
+}
+
+.soundboard-btn:active {
+  transform: scale(0.97);
+  background-color: #78350f;
+}
+
 

@@ -2,9 +2,17 @@ import { useState } from 'react'
 import LadderGame from './LadderGame.jsx'
 import MysteryGame from './MysteryGame.jsx'
 import AmongUsGame from './AmongUsGame.jsx'
+import FpsGame from './FpsGame.jsx'
 import React from 'react'
 
 const GAMES = [
+  { 
+    id: 'fps', 
+    emoji: '🔫', 
+    title: '3D 우주선 서바이벌 FPS', 
+    desc: '외계 침입자와 폭주한 AI 드론들을 소탕하고 우주선의 원자로 코어를 파괴하여 탈출하세요.',
+    sub: '난이도: ⭐⭐⭐⭐'
+  },
   { 
     id: 'mystery', 
     emoji: '🕵️', 
@@ -41,6 +49,8 @@ export default function App() {
           <LadderGame />
         ) : game === 'amongus' ? (
           <AmongUsGame />
+        ) : game === 'fps' ? (
+          <FpsGame />
         ) : (
           <MysteryGame />
         )}
